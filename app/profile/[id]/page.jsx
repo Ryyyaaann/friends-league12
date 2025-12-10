@@ -20,6 +20,7 @@ export default function ProfilePage() {
     // Edit Mode State
     const [isOwner, setIsOwner] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
+    const [currentUserEmail, setCurrentUserEmail] = useState(null);
 
     useEffect(() => {
         if (id) fetchData();
@@ -29,7 +30,11 @@ export default function ProfilePage() {
         setLoading(true);
         // 0. Check Auth & Ownership
         const { data: { user } } = await supabase.auth.getUser();
-        setIsOwner(user?.id === id);
+        const isUserProfile = user?.id === id;
+        setIsOwner(isUserProfile);
+        if (isUserProfile) {
+            setCurrentUserEmail(user.email);
+        }
 
         // 1. Profile
         const { data: prof } = await supabase
@@ -114,7 +119,9 @@ export default function ProfilePage() {
 
                         <div className="flex-1 text-center md:text-left">
                             <h1 className="text-3xl font-bold text-white mb-1">{profile.username}</h1>
-                            <p className="text-white/80 text-sm mb-1">{profile.email || "user@example.com"}</p>
+                            {(currentUserEmail || profile.email) && (
+                                <p className="text-white/80 text-sm mb-1">{currentUserEmail || profile.email}</p>
+                            )}
                             <p className="text-white/60 text-xs">Membro desde {new Date(profile.created_at).toLocaleDateString()}</p>
                         </div>
 
