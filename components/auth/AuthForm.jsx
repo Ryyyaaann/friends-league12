@@ -11,10 +11,11 @@ export default function AuthForm({ type = "login" }) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [successMessage, setSuccessMessage] = useState(null); // New state for success messages
     const [formData, setFormData] = useState({
         email: "",
         password: "",
-        username: "", // Only for signup
+        username: "",
     });
 
     const isLogin = type === "login";
@@ -23,6 +24,7 @@ export default function AuthForm({ type = "login" }) {
         e.preventDefault();
         setLoading(true);
         setError(null);
+        setSuccessMessage(null);
 
         try {
             if (isLogin) {
@@ -30,7 +32,12 @@ export default function AuthForm({ type = "login" }) {
                     email: formData.email,
                     password: formData.password,
                 });
-                if (error) throw error;
+                if (error) {
+                    if (error.message.includes("Email not confirmed")) {
+                        throw new Error("E-mail não confirmado. Por favor, verifique sua caixa de entrada.");
+                    }
+                    throw error;
+                }
                 router.push("/dashboard");
             } else {
                 const { error } = await supabase.auth.signUp({
@@ -43,12 +50,18 @@ export default function AuthForm({ type = "login" }) {
                     },
                 });
                 if (error) throw error;
-                // Ideally show success message or waiting for email confirmation
-                alert("Account created! Please check your email (if confirmation is enabled) or log in.");
-                router.push("/login");
+
+                // Show success message instead of redirecting immediately
+                setSuccessMessage("Conta criada com sucesso! Verifique seu e-mail para confirmar o cadastro antes de entrar.");
+                // Optional: Clear form or redirect after a delay
+                // router.push("/login"); 
             }
         } catch (err) {
-            setError(err.message);
+            // Translate common errors
+            let msg = err.message;
+            if (msg === "Invalid login credentials") msg = "Credenciais inválidas.";
+            if (msg.includes("already registered")) msg = "E-mail já cadastrado.";
+            setError(msg);
         } finally {
             setLoading(false);
         }
@@ -58,18 +71,25 @@ export default function AuthForm({ type = "login" }) {
         <div className="w-full max-w-md mx-auto p-8 rounded-2xl glass-card border-t border-white/10 shadow-2xl">
             <div className="text-center mb-8">
                 <h2 className="text-3xl font-bold bg-gradient-to-r from-primary to-purple-400 bg-clip-text text-transparent">
-                    {isLogin ? "Welcome Back" : "Join the League"}
+                    {isLogin ? "Bem-vindo de volta" : "Criar Conta"}
                 </h2>
                 <p className="text-muted-foreground mt-2 text-sm">
                     {isLogin
-                        ? "Enter your credentials to access your account."
-                        : "Start your journey to becoming the champion."}
+                        ? "Entre com suas credenciais para acessar."
+                        : "Junte-se à liga e comece a competir."}
                 </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
+                {successMessage && (
+                    <div className="bg-green-500/10 border border-green-500/20 text-green-400 text-sm p-4 rounded-lg flex items-start gap-2 animate-in fade-in slide-in-from-top-2">
+                        <span className="mt-0.5">✅</span>
+                        <span>{successMessage}</span>
+                    </div>
+                )}
+
                 {error && (
-                    <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm p-3 rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+                    <div className="bg-destructive/10 border border-destructive/20 text-red-400 text-sm p-3 rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
                         <span>⚠️</span>
                         {error}
                     </div>
@@ -77,13 +97,13 @@ export default function AuthForm({ type = "login" }) {
 
                 {!isLogin && (
                     <div className="space-y-2">
-                        <label className="text-sm font-medium ml-1">Username</label>
+                        <label className="text-sm font-medium ml-1">Nome de Usuário</label>
                         <div className="relative">
                             <input
                                 type="text"
                                 required
-                                className="w-full bg-background/50 border border-white/10 rounded-xl px-4 py-3 pl-11 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50"
-                                placeholder="Gamertag"
+                                className="w-full bg-background/50 border border-white/10 rounded-xl px-4 py-3 pl-11 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50 text-white"
+                                placeholder="Seu Nickname"
                                 value={formData.username}
                                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                             />
@@ -93,13 +113,13 @@ export default function AuthForm({ type = "login" }) {
                 )}
 
                 <div className="space-y-2">
-                    <label className="text-sm font-medium ml-1">Email</label>
+                    <label className="text-sm font-medium ml-1">E-mail</label>
                     <div className="relative">
                         <input
                             type="email"
                             required
-                            className="w-full bg-background/50 border border-white/10 rounded-xl px-4 py-3 pl-11 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50"
-                            placeholder="name@example.com"
+                            className="w-full bg-background/50 border border-white/10 rounded-xl px-4 py-3 pl-11 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50 text-white"
+                            placeholder="nome@exemplo.com"
                             value={formData.email}
                             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                         />
@@ -109,10 +129,10 @@ export default function AuthForm({ type = "login" }) {
 
                 <div className="space-y-2">
                     <div className="flex justify-between items-center ml-1">
-                        <label className="text-sm font-medium">Password</label>
+                        <label className="text-sm font-medium">Senha</label>
                         {isLogin && (
                             <Link href="/forgot-password" className="text-xs text-primary hover:underline">
-                                Forgot password?
+                                Esqueceu a senha?
                             </Link>
                         )}
                     </div>
@@ -120,7 +140,7 @@ export default function AuthForm({ type = "login" }) {
                         <input
                             type="password"
                             required
-                            className="w-full bg-background/50 border border-white/10 rounded-xl px-4 py-3 pl-11 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50"
+                            className="w-full bg-background/50 border border-white/10 rounded-xl px-4 py-3 pl-11 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50 text-white"
                             placeholder="••••••••"
                             value={formData.password}
                             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -138,7 +158,7 @@ export default function AuthForm({ type = "login" }) {
                         <Loader2 className="animate-spin" size={20} />
                     ) : (
                         <>
-                            {isLogin ? "Sign In" : "Create Account"}
+                            {isLogin ? "Entrar" : "Criar Conta"}
                             <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
                         </>
                     )}
@@ -146,12 +166,12 @@ export default function AuthForm({ type = "login" }) {
             </form>
 
             <div className="mt-6 text-center text-sm text-muted-foreground">
-                {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
+                {isLogin ? "Não tem uma conta?" : "Já tem uma conta?"}{" "}
                 <Link
                     href={isLogin ? "/signup" : "/login"}
                     className="text-primary font-semibold hover:underline"
                 >
-                    {isLogin ? "Sign up" : "Log in"}
+                    {isLogin ? "Cadastre-se" : "Faça login"}
                 </Link>
             </div>
         </div>
