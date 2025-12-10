@@ -37,9 +37,10 @@ export default function Navbar() {
     };
 
     const navItems = [
-        { name: "Home", href: "/", icon: Gamepad2 },
-        { name: "Games", href: "/games", icon: Users },
-        { name: "Competitions", href: "/competitions", icon: Trophy },
+        { name: "Início", href: "/", icon: Gamepad2 },
+        { name: "Jogos", href: "/games", icon: Users },
+        { name: "Competições", href: "/competitions", icon: Trophy },
+        { name: "Ranking", href: "/leaderboard", icon: Trophy },
     ];
 
     return (
