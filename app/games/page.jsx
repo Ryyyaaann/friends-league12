@@ -5,13 +5,19 @@ import { supabase } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
 import GameCard from "@/components/games/GameCard";
 import Link from "next/link";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, CloudDownload, Loader2 } from "lucide-react";
+
 
 export default function GamesPage() {
     const [games, setGames] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [user, setUser] = useState(null);
     const [search, setSearch] = useState("");
+
     const [userBacklog, setUserBacklog] = useState({}); // Map: game_id -> status
+    const [steamResults, setSteamResults] = useState([]);
+    const [searchingSteam, setSearchingSteam] = useState(false);
+
 
     useEffect(() => {
         fetchData();
@@ -41,8 +47,71 @@ export default function GamesPage() {
 
         setGames(gamesData || []);
         setUserBacklog(backlogMap);
+        setUser(user);
         setLoading(false);
     }
+
+
+    // Debounced search for Steam
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(() => {
+            if (search.length > 2) {
+                searchSteam();
+            } else {
+                setSteamResults([]);
+            }
+        }, 800);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [search]);
+
+    async function searchSteam() {
+        setSearchingSteam(true);
+        try {
+            const res = await fetch(`/api/steam/search?query=${encodeURIComponent(search)}`);
+            const data = await res.json();
+
+            // Filter out games we already have locally (optional, but good UX)
+            // For now, we'll just show them, maybe disable add button if duplicate check logic existed
+            setSteamResults(data.items || []);
+        } catch (error) {
+            console.error("Steam search failed", error);
+        } finally {
+            setSearchingSteam(false);
+        }
+    }
+
+    async function addSteamGame(steamGame) {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return alert("Please login to add games");
+
+            // Check if game already exists (by steam_id or title slug)
+            // Ideally we check DB, but simplified here:
+            // Just insert, if slug conflict handle error? 
+            // We'll generate a slug from title.
+            const slug = steamGame.title.toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g, '');
+
+            const { data, error } = await supabase.from('games').insert({
+                title: steamGame.title,
+                slug: slug + '-' + Math.floor(Math.random() * 1000), // Append random to avoid easy collisions
+                cover_url: steamGame.cover_url,
+                platforms: steamGame.platforms,
+                created_by: user.id
+                // storing steam_id would be good if schema supported it, assume not for now
+            }).select().single();
+
+            if (error) throw error;
+
+            alert(`Game "${steamGame.title}" added to library!`);
+            fetchData(); // Refresh local list
+            setSearch(""); // Clear search to see the new game?
+        } catch (error) {
+            console.error("Error adding steam game", error);
+            alert("Failed to add game. It might already exist.");
+        }
+    }
+
 
     const filteredGames = games.filter(g =>
         g.title.toLowerCase().includes(search.toLowerCase())
@@ -62,14 +131,17 @@ export default function GamesPage() {
                         <p className="text-muted-foreground mt-1">Discover games to compete in or play solo.</p>
                     </div>
 
-                    <Link
-                        href="/games/new"
-                        className="flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-primary/25 transition-all"
-                    >
-                        <Plus size={20} />
-                        Add New Game
-                    </Link>
+                    {user && (
+                        <Link
+                            href="/games/new"
+                            className="flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-primary/25 transition-all"
+                        >
+                            <Plus size={20} />
+                            Add New Game
+                        </Link>
+                    )}
                 </div>
+
 
                 {/* Search */}
                 <div className="relative max-w-md w-full mb-10">
@@ -108,6 +180,54 @@ export default function GamesPage() {
                         </Link>
                     </div>
                 )}
+
+                {/* Steam Results Section */}
+                {search.length > 2 && (
+                    <div className="mt-16 border-t border-white/10 pt-10">
+                        <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                            <span className="bg-blue-600 text-white p-1 rounded">Steam</span> Results
+                            {searchingSteam && <Loader2 className="animate-spin text-muted-foreground" size={20} />}
+                        </h2>
+
+                        {steamResults.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                                {steamResults.map(game => (
+                                    <div key={game.id} className="glass-card rounded-xl overflow-hidden group hover:border-primary/50 transition-all">
+                                        <div className="aspect-video bg-neutral-900 relative">
+                                            <img
+                                                src={game.cover_url}
+                                                alt={game.title}
+                                                className="w-full h-full object-cover"
+                                            />
+                                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                {user ? (
+                                                    <button
+                                                        onClick={() => addSteamGame(game)}
+                                                        className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transform translate-y-4 group-hover:translate-y-0 transition-all"
+                                                    >
+                                                        <CloudDownload size={18} /> Import
+                                                    </button>
+                                                ) : (
+                                                    <Link href="/login" className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-bold backdrop-blur-md transform translate-y-4 group-hover:translate-y-0 transition-all">
+                                                        Login to Import
+                                                    </Link>
+                                                )}
+                                            </div>
+
+                                        </div>
+                                        <div className="p-4">
+                                            <h3 className="font-bold text-lg truncate" title={game.title}>{game.title}</h3>
+                                            <p className="text-xs text-muted-foreground mt-1">Steam ID: {game.id}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            !searchingSteam && <p className="text-muted-foreground">No results found on Steam.</p>
+                        )}
+                    </div>
+                )}
+
             </div>
         </main>
     );

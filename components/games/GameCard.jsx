@@ -2,14 +2,20 @@
 
 import { Gamepad2, Plus, Star, Check, Loader2 } from "lucide-react";
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
 export default function GameCard({ game, savedStatus }) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
-    const [status, setStatus] = useState(savedStatus || null); // null, 'planned', 'playing', 'completed', 'dropped'
+    const [status, setStatus] = useState(savedStatus || null);
+    const [user, setUser] = useState(null);
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => setUser(data.user));
+    }, []);
+
 
     // Placeholder logic for cover image if valid URL isn't provided
     const coverImage = game.cover_url && game.cover_url.startsWith('http')
@@ -115,11 +121,17 @@ export default function GameCard({ game, savedStatus }) {
                         </button>
                     )}
 
-                    {game.slug && (
-                        <button className="p-2 border border-white/10 rounded-lg hover:bg-white/5 transition-colors text-muted-foreground hover:text-white" title="View Details">
+                    {/* Edit Button (Only for logged users) */}
+                    {user && (
+                        <button
+                            onClick={() => router.push(`/games/${game.id}/edit`)}
+                            className="p-2 border border-white/10 rounded-lg hover:bg-white/5 transition-colors text-muted-foreground hover:text-white"
+                            title="Edit Game"
+                        >
                             <Gamepad2 size={18} />
                         </button>
                     )}
+
                 </div>
             </div>
         </div>

@@ -15,6 +15,9 @@ export default function CompetitionDetailsPage() {
     const [matches, setMatches] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState("matches");
+    const [currentUser, setCurrentUser] = useState(null);
+    const [standings, setStandings] = useState([]);
+
 
     useEffect(() => {
         if (id) fetchData();
@@ -40,7 +43,7 @@ export default function CompetitionDetailsPage() {
         const { data: matchesData } = await supabase
             .from('matches')
             .select(`
-        id, score1, score2, status, match_date,
+        id, score1, score2, status, match_date, player1_id, player2_id,
         p1:player1_id(username),
         p2:player2_id(username)
       `)
@@ -48,8 +51,112 @@ export default function CompetitionDetailsPage() {
             .order('created_at', { ascending: false });
         setMatches(matchesData || []);
 
+        setMatches(matchesData || []);
+
+        // 4. Check Current User
+        const { data: { user } } = await supabase.auth.getUser();
+        setCurrentUser(user);
+
+        // 5. Calculate Standings
+        calculateStandings(parts || [], matchesData || []);
+
         setLoading(false);
     }
+
+    function calculateStandings(parts, matches) {
+        // Initialize stats
+        const stats = {};
+        parts.forEach(p => {
+            stats[p.user_id] = {
+                ...p,
+                points: 0,
+                wins: 0,
+                losses: 0,
+                draws: 0,
+                played: 0
+            };
+        });
+
+        // Process matches
+        matches.forEach(m => {
+            // Only count finished matches (assuming score exists implies finished, or add status check)
+            if (m.score1 !== null && m.score2 !== null) {
+                const p1 = stats[m.player1_id];
+                const p2 = stats[m.player2_id];
+
+                if (p1 && p2) {
+                    p1.played++;
+                    p2.played++;
+
+                    if (m.score1 > m.score2) {
+                        p1.wins++;
+                        p1.points += 3;
+                        p2.losses++;
+                    } else if (m.score2 > m.score1) {
+                        p2.wins++;
+                        p2.points += 3;
+                        p1.losses++;
+                    } else {
+                        p1.draws++;
+                        p1.points += 1;
+                        p2.draws++;
+                        p2.points += 1;
+                    }
+                }
+            }
+        });
+
+        // Convert to array and sort
+        const sorted = Object.values(stats).sort((a, b) => b.points - a.points || b.wins - a.wins);
+        setStandings(sorted);
+    }
+
+    async function handleFinish() {
+        if (!confirm("Tem certeza que deseja finalizar esta competição?")) return;
+
+        // Determine winner
+        let winnerId = null;
+        if (standings.length > 0) {
+            winnerId = standings[0].user_id;
+        }
+
+        const { data, error } = await supabase
+            .from('competitions')
+            .update({
+                status: 'finished',
+                winner_id: winnerId
+            })
+            .eq('id', id)
+            .select();
+
+        console.log("Finish result:", { data, error });
+
+        if (error) alert("Erro ao finalizar: " + error.message);
+        else if (data.length === 0) alert("Erro: Você não tem permissão para finalizar esta competição (RLS).");
+        else {
+            alert("Competição finalizada!");
+            fetchData();
+        }
+    }
+
+    async function handleDelete() {
+        if (!confirm("Tem certeza que deseja EXCLUIR esta competição? Essa ação não pode ser desfeita.")) return;
+        const { data, error } = await supabase
+            .from('competitions')
+            .delete()
+            .eq('id', id)
+            .select();
+
+        console.log("Delete result:", { data, error });
+
+        if (error) alert("Erro ao excluir: " + error.message);
+        else if (data.length === 0) alert("Erro: Você não tem permissão para excluir esta competição (RLS).");
+        else {
+            alert("Competição excluída.");
+            window.location.href = '/competitions';
+        }
+    }
+
 
     if (loading) return (
         <div className="min-h-screen bg-background pt-20 flex justify-center">
@@ -79,8 +186,8 @@ export default function CompetitionDetailsPage() {
                         </Link>
                         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
                             <div>
-                                <span className="text-primary font-bold tracking-wider text-xs uppercase mb-2 block">
-                                    Torneio {competition.format.replace('_', ' ')}
+                                <span className={clsx("font-bold tracking-wider text-xs uppercase mb-2 block", competition.status === 'finished' ? "text-green-400" : "text-primary")}>
+                                    {competition.status === 'finished' ? 'COMPETIÇÃO FINALIZADA' : `Torneio ${competition.format.replace('_', ' ')}`}
                                 </span>
                                 <h1 className="text-4xl md:text-5xl font-bold text-white mb-2">{competition.name}</h1>
                                 <div className="flex items-center gap-4 text-sm text-gray-300">
@@ -90,16 +197,32 @@ export default function CompetitionDetailsPage() {
                                 </div>
                             </div>
 
-                            {/* Action Button */}
-                            <Link
-                                href={`/competitions/${id}/report`}
-                                className="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-primary/25 transition-all"
-                            >
-                                <Plus size={20} /> Registrar Partida
-                            </Link>
+                            {/* Actions */}
+                            <div className="flex gap-2">
+                                {currentUser?.id === competition.organizer_id && (
+                                    <>
+                                        <button onClick={handleDelete} className="bg-red-500/20 hover:bg-red-500/30 text-red-500 px-4 py-3 rounded-xl font-bold transition-all">
+                                            Excluir
+                                        </button>
+                                        {competition.status !== 'finished' && (
+                                            <button onClick={handleFinish} className="bg-green-500/20 hover:bg-green-500/30 text-green-500 px-4 py-3 rounded-xl font-bold transition-all">
+                                                Concluir
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+
+                                <Link
+                                    href={`/competitions/${id}/report`}
+                                    className="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-primary/25 transition-all"
+                                >
+                                    <Plus size={20} /> Registrar Partida
+                                </Link>
+                            </div>
                         </div>
                     </div>
                 </div>
+
             </div>
 
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -169,12 +292,12 @@ export default function CompetitionDetailsPage() {
                                         <th className="p-4">Jogador</th>
                                         <th className="p-4 text-center">V</th>
                                         <th className="p-4 text-center">D</th>
-                                        <th className="p-4 text-center">Taxa de Vitória</th>
+                                        <th className="p-4 text-center">Pontos</th>
+
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {/* Placeholder Leaderboard Logic - normally calculated from matches */}
-                                    {participants.map((p, idx) => (
+                                    {standings.map((p, idx) => (
                                         <tr key={p.id} className="border-t border-white/5 hover:bg-white/5 transition-colors">
                                             <td className="p-4 font-mono text-muted-foreground">#{idx + 1}</td>
                                             <td className="p-4 font-bold flex items-center gap-3">
@@ -182,13 +305,15 @@ export default function CompetitionDetailsPage() {
                                                     {p.profiles?.username?.[0]}
                                                 </div>
                                                 {p.profiles?.username}
+                                                {idx === 0 && <Trophy size={14} className="text-yellow-400" />}
                                             </td>
-                                            <td className="p-4 text-center text-green-400">0</td>
-                                            <td className="p-4 text-center text-red-400">0</td>
-                                            <td className="p-4 text-center text-muted-foreground">0%</td>
+                                            <td className="p-4 text-center text-green-400">{p.wins}</td>
+                                            <td className="p-4 text-center text-red-400">{p.losses}</td>
+                                            <td className="p-4 text-center text-white font-bold">{p.points} Pts</td>
                                         </tr>
                                     ))}
                                 </tbody>
+
                             </table>
                         </div>
                     )}
