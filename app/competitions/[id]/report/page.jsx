@@ -5,11 +5,14 @@ import { supabase } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
 import { ArrowLeft, Trophy, Swords, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 
 export default function ReportMatchPage() {
     const { id } = useParams();
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const matchId = searchParams.get('matchId');
+
     const [loading, setLoading] = useState(false);
     const [participants, setParticipants] = useState([]);
 
@@ -21,7 +24,8 @@ export default function ReportMatchPage() {
     });
 
     useEffect(() => {
-        async function loadParticipants() {
+        async function loadData() {
+            // 1. Load Participants
             const { data } = await supabase
                 .from('competition_participants')
                 .select('user_id, profiles(username, avatar_url, id)')
@@ -34,9 +38,27 @@ export default function ReportMatchPage() {
             })) || [];
 
             setParticipants(mapped);
+
+            // 2. Load Match if matchId exists
+            if (matchId) {
+                const { data: match } = await supabase
+                    .from('matches')
+                    .select('*')
+                    .eq('id', matchId)
+                    .single();
+
+                if (match) {
+                    setFormData({
+                        player1_id: match.player1_id,
+                        player2_id: match.player2_id,
+                        score1: match.score1 || 0,
+                        score2: match.score2 || 0
+                    });
+                }
+            }
         }
-        loadParticipants();
-    }, [id]);
+        loadData();
+    }, [id, matchId]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -52,16 +74,35 @@ export default function ReportMatchPage() {
             if (formData.score1 > formData.score2) winner_id = formData.player1_id;
             if (formData.score2 > formData.score1) winner_id = formData.player2_id;
 
-            const { error } = await supabase.from('matches').insert({
-                competition_id: id,
-                player1_id: formData.player1_id,
-                player2_id: formData.player2_id,
-                score1: formData.score1,
-                score2: formData.score2,
-                status: 'finished',
-                match_date: new Date().toISOString(),
-                winner_id: winner_id
-            });
+            let error;
+
+            if (matchId) {
+                // Update existing match
+                const { error: updateError } = await supabase
+                    .from('matches')
+                    .update({
+                        score1: formData.score1,
+                        score2: formData.score2,
+                        status: 'finished',
+                        match_date: new Date().toISOString(),
+                        winner_id: winner_id
+                    })
+                    .eq('id', matchId);
+                error = updateError;
+            } else {
+                // Create new match
+                const { error: insertError } = await supabase.from('matches').insert({
+                    competition_id: id,
+                    player1_id: formData.player1_id,
+                    player2_id: formData.player2_id,
+                    score1: formData.score1,
+                    score2: formData.score2,
+                    status: 'finished',
+                    match_date: new Date().toISOString(),
+                    winner_id: winner_id
+                });
+                error = insertError;
+            }
 
             if (error) throw error;
 

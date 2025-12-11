@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
-import { ArrowLeft, Clock, Trophy, Users, Plus, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Clock, Trophy, Users, Plus, CheckCircle2, Swords } from "lucide-react";
 import clsx from "clsx";
 import { useParams } from "next/navigation";
 
@@ -73,14 +73,15 @@ export default function CompetitionDetailsPage() {
                 wins: 0,
                 losses: 0,
                 draws: 0,
-                played: 0
+                played: 0,
+                total_round_wins: 0 // New stat for cumulative
             };
         });
 
         // Process matches
         matches.forEach(m => {
             // Only count finished matches (assuming score exists implies finished, or add status check)
-            if (m.score1 !== null && m.score2 !== null) {
+            if ((m.status === 'finished' || (m.score1 !== undefined && m.score2 !== undefined)) && m.status !== 'scheduled') {
                 const p1 = stats[m.player1_id];
                 const p2 = stats[m.player2_id];
 
@@ -88,27 +89,44 @@ export default function CompetitionDetailsPage() {
                     p1.played++;
                     p2.played++;
 
-                    if (m.score1 > m.score2) {
-                        p1.wins++;
-                        p1.points += 3;
-                        p2.losses++;
-                    } else if (m.score2 > m.score1) {
-                        p2.wins++;
-                        p2.points += 3;
-                        p1.losses++;
+                    if (competition?.format === 'pontos_corridos_cumulative') {
+                        // Cumulative Logic
+                        p1.total_round_wins += (m.score1 || 0);
+                        p2.total_round_wins += (m.score2 || 0);
                     } else {
-                        p1.draws++;
-                        p1.points += 1;
-                        p2.draws++;
-                        p2.points += 1;
+                        // Standard Logic
+                        if (m.score1 > m.score2) {
+                            p1.wins++;
+                            p1.points += 3;
+                            p2.losses++;
+                        } else if (m.score2 > m.score1) {
+                            p2.wins++;
+                            p2.points += 3;
+                            p1.losses++;
+                        } else {
+                            p1.draws++;
+                            p1.points += 1;
+                            p2.draws++;
+                            p2.points += 1;
+                        }
                     }
                 }
             }
         });
 
-        // Convert to array and sort
-        const sorted = Object.values(stats).sort((a, b) => b.points - a.points || b.wins - a.wins);
-        setStandings(sorted);
+        // Post-process Cumulative Points
+        if (competition?.format === 'pontos_corridos_cumulative') {
+            Object.values(stats).forEach(p => {
+                p.points = Math.floor(p.total_round_wins / 10);
+            });
+            // Sort by Points desc, then Total Round Wins desc
+            const sorted = Object.values(stats).sort((a, b) => b.points - a.points || b.total_round_wins - a.total_round_wins);
+            setStandings(sorted);
+        } else {
+            // Standard Sort
+            const sorted = Object.values(stats).sort((a, b) => b.points - a.points || b.wins - a.wins);
+            setStandings(sorted);
+        }
     }
 
     async function handleFinish() {
@@ -117,7 +135,17 @@ export default function CompetitionDetailsPage() {
         // Determine winner
         let winnerId = null;
         if (standings.length > 0) {
-            winnerId = standings[0].user_id;
+            if (competition?.format === 'pontos_corridos_cumulative') {
+                // Check win condition (>= 2 points)
+                if (standings[0].points >= 2) {
+                    winnerId = standings[0].user_id;
+                } else {
+                    if (!confirm("O líder ainda não atingiu 2 pontos. Deseja finalizar mesmo assim?")) return;
+                    winnerId = standings[0].user_id;
+                }
+            } else {
+                winnerId = standings[0].user_id;
+            }
         }
 
         const { data, error } = await supabase
@@ -257,29 +285,72 @@ export default function CompetitionDetailsPage() {
                 <div className="min-h-[400px]">
 
                     {activeTab === 'matches' && (
-                        <div className="space-y-4">
-                            {matches.length > 0 ? matches.map((match) => (
-                                <div key={match.id} className="glass-card p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
-                                    <div className="flex items-center gap-8 flex-1">
-                                        <div className="flex-1 text-right font-medium text-lg">
-                                            {match.p1?.username || "TBD"}
-                                        </div>
-                                        <div className="bg-black/40 rounded px-3 py-1 text-xl font-mono tracking-widest border border-white/10">
-                                            {match.score1} - {match.score2}
-                                        </div>
-                                        <div className="flex-1 text-left font-medium text-lg">
-                                            {match.p2?.username || "TBD"}
-                                        </div>
+                        <div className="space-y-8">
+                            {/* Scheduled Matches */}
+                            {matches.filter(m => m.status === 'scheduled').length > 0 && (
+                                <div>
+                                    <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4 pl-1">Partidas Agendadas</h3>
+                                    <div className="space-y-3">
+                                        {matches.filter(m => m.status === 'scheduled').map((match) => (
+                                            <div key={match.id} className="glass-card p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors border border-white/5">
+                                                <div className="flex items-center gap-4 md:gap-8 flex-1">
+                                                    <div className="flex-1 text-right font-medium text-white/70">
+                                                        {match.p1?.username || "TBD"}
+                                                    </div>
+                                                    <div className="px-3 py-1 text-sm font-bold text-muted-foreground">
+                                                        VS
+                                                    </div>
+                                                    <div className="flex-1 text-left font-medium text-white/70">
+                                                        {match.p2?.username || "TBD"}
+                                                    </div>
+                                                </div>
+                                                <div className="ml-4">
+                                                    <Link
+                                                        href={`/competitions/${id}/report?matchId=${match.id}`}
+                                                        className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/50 px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2"
+                                                    >
+                                                        <Swords size={14} /> Jogar
+                                                    </Link>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <div className="ml-8 text-xs text-muted-foreground hidden md:block">
-                                        {new Date(match.match_date || Date.now()).toLocaleDateString()}
-                                    </div>
-                                </div>
-                            )) : (
-                                <div className="text-center py-10 border border-dashed border-white/10 rounded-xl">
-                                    <p className="text-muted-foreground">Nenhuma partida registrada ainda.</p>
                                 </div>
                             )}
+
+                            {/* Finished Matches */}
+                            <div>
+                                {matches.some(m => m.status !== 'scheduled') && (
+                                    <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4 pl-1">Resultados</h3>
+                                )}
+
+                                {matches.filter(m => m.status !== 'scheduled').length > 0 ? (
+                                    <div className="space-y-3">
+                                        {matches.filter(m => m.status !== 'scheduled').map((match) => (
+                                            <div key={match.id} className="glass-card p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
+                                                <div className="flex items-center gap-8 flex-1">
+                                                    <div className="flex-1 text-right font-medium text-lg">
+                                                        {match.p1?.username || "TBD"}
+                                                    </div>
+                                                    <div className="bg-black/40 rounded px-3 py-1 text-xl font-mono tracking-widest border border-white/10">
+                                                        {match.score1} - {match.score2}
+                                                    </div>
+                                                    <div className="flex-1 text-left font-medium text-lg">
+                                                        {match.p2?.username || "TBD"}
+                                                    </div>
+                                                </div>
+                                                <div className="ml-8 text-xs text-muted-foreground hidden md:block">
+                                                    {new Date(match.match_date || Date.now()).toLocaleDateString()}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : matches.length === 0 && (
+                                    <div className="text-center py-10 border border-dashed border-white/10 rounded-xl">
+                                        <p className="text-muted-foreground">Nenhuma partida registrada ainda.</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
 
@@ -290,10 +361,18 @@ export default function CompetitionDetailsPage() {
                                     <tr>
                                         <th className="p-4">Posição</th>
                                         <th className="p-4">Jogador</th>
-                                        <th className="p-4 text-center">V</th>
-                                        <th className="p-4 text-center">D</th>
-                                        <th className="p-4 text-center">Pontos</th>
-
+                                        {competition.format === 'pontos_corridos_cumulative' ? (
+                                            <>
+                                                <th className="p-4 text-center">Rounds (V)</th>
+                                                <th className="p-4 text-center">Pontos (Meta: 2)</th>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <th className="p-4 text-center">V</th>
+                                                <th className="p-4 text-center">D</th>
+                                                <th className="p-4 text-center">Pontos</th>
+                                            </>
+                                        )}
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -307,9 +386,21 @@ export default function CompetitionDetailsPage() {
                                                 {p.profiles?.username}
                                                 {idx === 0 && <Trophy size={14} className="text-yellow-400" />}
                                             </td>
-                                            <td className="p-4 text-center text-green-400">{p.wins}</td>
-                                            <td className="p-4 text-center text-red-400">{p.losses}</td>
-                                            <td className="p-4 text-center text-white font-bold">{p.points} Pts</td>
+
+                                            {competition.format === 'pontos_corridos_cumulative' ? (
+                                                <>
+                                                    <td className="p-4 text-center text-blue-400 font-bold">{p.total_round_wins}</td>
+                                                    <td className="p-4 text-center text-white font-bold text-lg">
+                                                        {p.points} <span className="text-xs text-muted-foreground font-normal">/ 2</span>
+                                                    </td>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <td className="p-4 text-center text-green-400">{p.wins}</td>
+                                                    <td className="p-4 text-center text-red-400">{p.losses}</td>
+                                                    <td className="p-4 text-center text-white font-bold">{p.points} Pts</td>
+                                                </>
+                                            )}
                                         </tr>
                                     ))}
                                 </tbody>

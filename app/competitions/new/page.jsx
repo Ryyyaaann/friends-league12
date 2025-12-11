@@ -74,6 +74,34 @@ export default function CreateCompetitionPage() {
                     .insert(participantsData);
 
                 if (partError) throw partError;
+
+                // 3. Generate Schedule (if Pontos Corridos or Cumulative)
+                if (['pontos_corridos', 'pontos_corridos_cumulative'].includes(formData.format) && formData.participants.length >= 2) {
+                    const matchesToInsert = [];
+                    const p = formData.participants;
+                    // Round Robin Logic: Everyone plays everyone once
+                    for (let i = 0; i < p.length; i++) {
+                        for (let j = i + 1; j < p.length; j++) {
+                            matchesToInsert.push({
+                                competition_id: comp.id,
+                                player1_id: p[i],
+                                player2_id: p[j],
+                                status: 'scheduled',
+                                score1: 0,
+                                score2: 0,
+                                match_date: null
+                            });
+                        }
+                    }
+
+                    if (matchesToInsert.length > 0) {
+                        const { error: matchError } = await supabase
+                            .from('matches')
+                            .insert(matchesToInsert);
+
+                        if (matchError) throw matchError;
+                    }
+                }
             }
 
             router.push(`/competitions/${comp.id}`);
@@ -163,18 +191,24 @@ export default function CreateCompetitionPage() {
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium">Formato</label>
                                     <div className="grid grid-cols-2 gap-4">
-                                        {['1v1', 'Times', 'Pontos Corridos', 'Chaves'].map(fmt => (
+                                        {[
+                                            { id: '1v1', label: '1v1' },
+                                            { id: 'times', label: 'Times' },
+                                            { id: 'pontos_corridos', label: 'Pontos Corridos' },
+                                            { id: 'chaves', label: 'Chaves' },
+                                            { id: 'pontos_corridos_cumulative', label: 'Acumulativo (10 wins = 1 pt)' }
+                                        ].map(fmt => (
                                             <div
-                                                key={fmt}
-                                                onClick={() => setFormData({ ...formData, format: fmt.toLowerCase().replace(' ', '_') })}
+                                                key={fmt.id}
+                                                onClick={() => setFormData({ ...formData, format: fmt.id })}
                                                 className={clsx(
-                                                    "p-4 rounded-xl border cursor-pointer transition-all text-center",
-                                                    formData.format === fmt.toLowerCase().replace(' ', '_')
+                                                    "p-4 rounded-xl border cursor-pointer transition-all text-center flex items-center justify-center",
+                                                    formData.format === fmt.id
                                                         ? "border-primary bg-primary/10 text-primary font-bold"
                                                         : "border-white/10 bg-white/5 hover:bg-white/10 text-muted-foreground"
                                                 )}
                                             >
-                                                {fmt}
+                                                {fmt.label}
                                             </div>
                                         ))}
                                     </div>

@@ -55,19 +55,33 @@ export default function LeaderboardPage() {
         setTitleStats(titlesLeaderboard);
 
 
-        // --- 2. Fetch Matches Won Leaderboard ---
+        // --- 2. Fetch Matches Won Leaderboard (Manual Join) ---
         const { data: statsData } = await supabase
             .from('player_stats')
-            .select('*, profiles(username, avatar_url)')
+            .select('*')
             .order('wins', { ascending: false })
             .limit(20);
 
-        const winsLeaderboard = (statsData || []).map(stat => ({
-            player_id: stat.player_id,
-            count: stat.wins,
-            profiles: stat.profiles,
-            details: stat // keep full stats if needed
-        }));
+        let winsLeaderboard = [];
+        if (statsData && statsData.length > 0) {
+            const playerIds = statsData.map(s => s.player_id);
+            const { data: profilesData } = await supabase
+                .from('profiles')
+                .select('id, username, avatar_url')
+                .in('id', playerIds);
+
+            const profilesMap = (profilesData || []).reduce((acc, p) => {
+                acc[p.id] = p;
+                return acc;
+            }, {});
+
+            winsLeaderboard = statsData.map(stat => ({
+                player_id: stat.player_id,
+                count: stat.wins,
+                profiles: profilesMap[stat.player_id],
+                details: stat
+            }));
+        }
 
         setMatchStats(winsLeaderboard);
 
