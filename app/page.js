@@ -10,6 +10,8 @@ export default function Home() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ wins: 0, losses: 0, total_matches: 0, active_competitions: 0 });
+  const [myCompetitions, setMyCompetitions] = useState([]);
+  const [recentMatches, setRecentMatches] = useState([]);
 
   useEffect(() => {
     checkUser();
@@ -27,15 +29,48 @@ export default function Home() {
         .eq('player_id', user.id)
         .single();
 
-      // Fetch Active Competitions count (placeholder logic, assuming we count competitions user is part of)
-      // For now just hardcoding or simpler query if needed. 
-      // Let's rely on what we can get easily or default to 0.
+      // Fetch Participated Competitions
+      const { data: participations } = await supabase
+        .from('competition_participants')
+        .select(`
+          competition_id,
+          competitions (
+            id,
+            name,
+            status,
+            created_at,
+            format,
+            games (title, cover_url)
+          )
+        `)
+        .eq('user_id', user.id);
+
+      const comps = participations?.map(p => p.competitions) || [];
+      setMyCompetitions(comps);
+
+      // Fetch Recent Matches
+      const { data: matches } = await supabase
+        .from('matches')
+        .select(`
+          id, score1, score2, status, match_date, player1_id, player2_id,
+          p1:player1_id(username),
+          p2:player2_id(username),
+          competitions (
+            name,
+            games (title)
+          )
+        `)
+        .or(`player1_id.eq.${user.id},player2_id.eq.${user.id}`)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      setRecentMatches(matches || []);
 
       setStats({
         wins: stat?.wins || 0,
         losses: stat?.losses || 0,
         total_matches: stat?.total_matches || 0,
-        active_competitions: 0
+        active_competitions: comps.filter(c => c.status !== 'finished').length
       });
     }
 
@@ -105,20 +140,95 @@ export default function Home() {
               <h2 className="text-xl font-bold">Minhas Competições</h2>
               <Link href="/competitions" className="text-sm text-[#A78BFA] hover:text-white transition-colors">Ver todas</Link>
             </div>
-            <div className="bg-[#1E1629] rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center text-gray-500">
-              <Trophy size={48} className="mb-4 opacity-20" />
-              <p className="mb-2">Você ainda não está participando de nenhuma competição</p>
-              <Link href="/competitions" className="text-[#A78BFA] text-sm hover:underline">Explorar competições</Link>
-            </div>
+            {myCompetitions.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {myCompetitions.map((comp) => (
+                  <Link href={`/competitions/${comp.id}`} key={comp.id} className="group glass-card p-4 rounded-xl hover:bg-white/10 transition-all flex items-start gap-4">
+                    <div className="w-16 h-20 bg-neutral-800 rounded-lg overflow-hidden flex-shrink-0">
+                      {comp.games?.cover_url ? (
+                        <img src={comp.games.cover_url} alt={comp.games.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-white/20">
+                          <Gamepad2 size={24} />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-white truncate group-hover:text-primary transition-colors">{comp.name}</h3>
+                      <p className="text-sm text-gray-400 truncate">{comp.games?.title}</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${comp.status === 'finished'
+                          ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                          : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+                          }`}>
+                          {comp.status === 'finished' ? 'Finalizado' : 'Em Andamento'}
+                        </span>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-[#1E1629] rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center text-gray-500">
+                <Trophy size={48} className="mb-4 opacity-20" />
+                <p className="mb-2">Você ainda não está participando de nenhuma competição</p>
+                <Link href="/competitions" className="text-[#A78BFA] text-sm hover:underline">Explorar competições</Link>
+              </div>
+            )}
           </div>
 
           {/* Partidas Recentes */}
+          {/* Partidas Recentes */}
           <div>
             <h2 className="text-xl font-bold mb-4">Partidas Recentes</h2>
-            <div className="bg-[#1E1629] rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center text-gray-500">
-              <Calendar size={48} className="mb-4 opacity-20" />
-              <p>Nenhuma partida registrada ainda</p>
-            </div>
+            {recentMatches.length > 0 ? (
+              <div className="space-y-4">
+                {recentMatches.map((match) => {
+                  const isP1 = match.player1_id === user.id;
+                  const myScore = isP1 ? match.score1 : match.score2;
+                  const opScore = isP1 ? match.score2 : match.score1;
+                  const opponentName = isP1 ? match.p2?.username : match.p1?.username;
+                  const isWin = myScore > opScore;
+                  const isLoss = myScore < opScore;
+                  const isDraw = myScore === opScore;
+
+                  let resultColor = "text-gray-400";
+                  if (isWin) resultColor = "text-green-400";
+                  if (isLoss) resultColor = "text-red-400";
+
+                  return (
+                    <div key={match.id} className="glass-card p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
+                      <div className="flex items-center gap-4 md:gap-8 flex-1">
+                        <div className="flex flex-col">
+                          <span className="text-xs text-muted-foreground uppercase">{match.competitions?.games?.title}</span>
+                          <span className="text-sm font-bold text-white">{match.competitions?.name}</span>
+                        </div>
+
+                        <div className="flex items-center gap-4 flex-1 justify-center">
+                          <div className="text-right flex-1">
+                            <span className="font-bold text-white">Você</span>
+                          </div>
+                          <div className={`bg-black/40 rounded px-3 py-1 font-mono tracking-widest border border-white/10 ${resultColor}`}>
+                            {myScore} - {opScore}
+                          </div>
+                          <div className="text-left flex-1">
+                            <span className="text-gray-400">{opponentName || "TBD"}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="ml-4 text-xs text-muted-foreground hidden sm:block">
+                        {new Date(match.match_date || Date.now()).toLocaleDateString()}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="bg-[#1E1629] rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center text-gray-500">
+                <Calendar size={48} className="mb-4 opacity-20" />
+                <p>Nenhuma partida registrada ainda</p>
+              </div>
+            )}
           </div>
 
         </div>

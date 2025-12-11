@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
 import { Gamepad2, Trophy, Crosshair, Ban, Clock, CheckCircle2, TrendingUp, Calendar, Edit2, User } from "lucide-react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import clsx from "clsx";
 
 import ProfileEditModal from "@/components/profile/ProfileEditModal";
@@ -14,6 +15,8 @@ export default function ProfilePage() {
     const [profile, setProfile] = useState(null);
     const [stats, setStats] = useState(null);
     const [backlog, setBacklog] = useState([]);
+    const [competitions, setCompetitions] = useState([]);
+    const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState("backlog");
 
@@ -58,6 +61,42 @@ export default function ProfilePage() {
             .select('*, games(*)')
             .eq('user_id', id);
         setBacklog(backlogData || []);
+
+        // 4. Competitions
+        const { data: participations } = await supabase
+            .from('competition_participants')
+            .select(`
+                competition_id,
+                competitions (
+                    id,
+                    name,
+                    status,
+                    created_at,
+                    format,
+                    games (title, cover_url)
+                )
+            `)
+            .eq('user_id', id);
+
+        setCompetitions(participations?.map(p => p.competitions) || []);
+
+        // 5. Match History
+        const { data: matches } = await supabase
+            .from('matches')
+            .select(`
+                id, score1, score2, status, match_date, player1_id, player2_id,
+                p1:player1_id(username),
+                p2:player2_id(username),
+                competitions (
+                    id,
+                    name,
+                    games (title, cover_url)
+                )
+            `)
+            .or(`player1_id.eq.${id},player2_id.eq.${id}`)
+            .order('created_at', { ascending: false });
+
+        setHistory(matches || []);
 
         setLoading(false);
     }
@@ -194,9 +233,88 @@ export default function ProfilePage() {
                         <BacklogSection backlog={backlog} />
                     )}
 
-                    {(activeTab === 'history' || activeTab === 'competitions') && (
-                        <div className="bg-[#1E1629] rounded-xl p-20 text-center border border-white/5 text-gray-500">
-                            <p>Em breve...</p>
+                    {activeTab === 'competitions' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {competitions.length > 0 ? competitions.map((comp) => (
+                                <Link href={`/competitions/${comp.id}`} key={comp.id} className="group glass-card p-4 rounded-xl hover:bg-white/10 transition-all flex items-start gap-4 border border-white/5 hover:border-white/10">
+                                    <div className="w-16 h-20 bg-neutral-800 rounded-lg overflow-hidden flex-shrink-0">
+                                        {comp.games?.cover_url ? (
+                                            <img src={comp.games.cover_url} alt={comp.games.title} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center text-white/20">
+                                                <Gamepad2 size={24} />
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <h3 className="font-bold text-white truncate group-hover:text-primary transition-colors">{comp.name}</h3>
+                                        <p className="text-sm text-gray-400 truncate">{comp.games?.title}</p>
+                                        <div className="mt-2 flex items-center gap-2">
+                                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${comp.status === 'finished'
+                                                ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                                                : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+                                                }`}>
+                                                {comp.status === 'finished' ? 'Finalizado' : 'Em Andamento'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </Link>
+                            )) : (
+                                <div className="col-span-full bg-[#1E1629] rounded-xl p-12 text-center border border-white/5 flex flex-col items-center justify-center text-gray-500">
+                                    <Trophy size={48} className="mb-4 opacity-20" />
+                                    <p>Este jogador não está em nenhuma competição.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === 'history' && (
+                        <div className="space-y-4">
+                            {history.length > 0 ? history.map((match) => {
+                                const isP1 = match.player1_id === id;
+                                const myScore = isP1 ? match.score1 : match.score2;
+                                const opScore = isP1 ? match.score2 : match.score1;
+                                const opponentName = isP1 ? match.p2?.username : match.p1?.username;
+                                const isWin = myScore > opScore;
+                                const isLoss = myScore < opScore;
+
+                                let resultColor = "text-gray-400";
+                                if (isWin) resultColor = "text-green-400";
+                                if (isLoss) resultColor = "text-red-400";
+
+                                return (
+                                    <div key={match.id} className="glass-card p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors border border-white/5">
+                                        <div className="flex items-center gap-4 md:gap-8 flex-1">
+                                            <div className="flex flex-col w-32 md:w-48">
+                                                <span className="text-xs text-muted-foreground uppercase truncate">{match.competitions?.games?.title}</span>
+                                                <Link href={`/competitions/${match.competitions?.id}`} className="text-sm font-bold text-white hover:text-primary truncate transition-colors">
+                                                    {match.competitions?.name}
+                                                </Link>
+                                            </div>
+
+                                            <div className="flex items-center gap-4 flex-1 justify-center">
+                                                <div className="text-right flex-1 hidden sm:block">
+                                                    <span className="font-bold text-white">{profile.username}</span>
+                                                </div>
+                                                <div className={`bg-black/40 rounded px-3 py-1 font-mono tracking-widest border border-white/10 ${resultColor}`}>
+                                                    {myScore} - {opScore}
+                                                </div>
+                                                <div className="text-left flex-1 hidden sm:block">
+                                                    <span className="text-gray-400">{opponentName || "TBD"}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="ml-4 text-xs text-muted-foreground hidden md:block">
+                                            {new Date(match.match_date || Date.now()).toLocaleDateString()}
+                                        </div>
+                                    </div>
+                                );
+                            }) : (
+                                <div className="bg-[#1E1629] rounded-xl p-20 text-center border border-white/5 text-gray-500">
+                                    <Calendar size={48} className="mb-4 opacity-20 mx-auto" />
+                                    <p>Nenhuma partida encontrada.</p>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
